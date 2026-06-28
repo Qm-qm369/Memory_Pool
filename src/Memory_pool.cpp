@@ -36,6 +36,40 @@ namespace memoryPool
 
     void* MemoryPool::allocate()
     {
-        
+        //优先使用空闲链表中的内存槽
+        if(freeList_ != nullptr)
+        {
+            std::lock_guard<std::mutex> lock(mutexForFreelist_);
+            if(freeList_ != nullptr)
+            {
+                Slot* tmp = freeList_;
+                freeList_ = freeList_->next;
+                return tmp;
+            }
+        }
+
+        Slot* tmp;
+        {
+            std::lock_guard<std::mutex> lock(mutexForBlock_);
+            if(curSlot_ >= lastSlot_)
+            {
+                //当前内存已经满了 需要申请新的内存
+                allocateNewBlock();
+            }
+            tmp = curSlot_;
+            curSlot_ += SlotSize_ / sizeof(Slot);
+        }
+        return tmp;
+    }
+
+    void MemoryPool::deallocate(void* ptr)
+    {
+        if(ptr)
+        {
+            //回收内存，把内存通过头插法插入到空闲链表中
+            std::lock_guard<std::mutex> lock(mutexForFreelist_);
+            reinterpret_cast<Slot*>(ptr)->next = freeList_;
+            freeList_ = reinterpret_cast<Slot*>(ptr);
+        }
     }
 }
