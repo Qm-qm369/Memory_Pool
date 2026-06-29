@@ -72,4 +72,44 @@ namespace memoryPool
             freeList_ = reinterpret_cast<Slot *>(ptr);
         }
     }
+
+    void MemoryPool::allocateNewBlock()
+    {
+        // std::count << "申请一块新的内存, SlotSize_:" << SlotSize_ << endl;
+        //  头插法插入新的内存块
+        void *newBlock = operator new(BlockSize_);
+        reinterpret_cast<Slot *>(newBlock)->next = firstBlock_;
+        firstBlock_ = reinterpret_cast<Slot *>(newBlock);
+
+        char *body = reinterpret_cast<char *>(newBlock) + sizeof(Slot *);
+        size_t paddingSize = padPointer(body, SlotSize_);
+        curSlot_ = reinterpret_cast<Slot *>(body + paddingSize);
+
+        // 超过该标记位置，则说明该内存块已无内存槽可用，需向系统申请新的内存块；
+        lastSlot_ = reinterpret_cast<Slot *>(reinterpret_cast<size_t>(newBlock) + BlockSize_ - SlotSize_ + 1);
+
+        freeList_ = nullptr;
+    }
+
+    // 让指针对齐到槽大小的倍数位置
+    size_t MemoryPool::padPointer(char *p, size_t align)
+    {
+        // align是槽大小
+        return (align - reinterpret_cast<size_t>(p) % align);
+    }
+
+    void HashBucket::initMemoryPool()
+    {
+        for (int i = 0; i < MEMORY_POOL_NUM; i++)
+        {
+            getMemoryPool(i).init((i + 1) * SLOT_BASE_SIZE);
+        }
+    }
+
+    // 单例模式
+    MemoryPool &HashBucket::getMemoryPool(int index)
+    {
+        static MemoryPool memoryPool[MEMORY_POOL_NUM];
+        return memoryPool[index];
+    }
 }
