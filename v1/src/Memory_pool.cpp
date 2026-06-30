@@ -11,7 +11,8 @@ namespace memoryPool
         是从无到有；赋值是对象已存在后，后续覆盖修改已有数值，是从旧到新，
         且 const、引用等成员仅支持初始化、不支持赋值，初始化效率也高于先默认构造再赋值的方式。
         */
-        : BlockSize_(BlockSize)
+        : BlockSize_(BlockSize), SlotSize_(0), firstBlock_(nullptr),
+          curSlot_(nullptr), freeList_(nullptr), lastSlot_(nullptr)
     {
     }
     // 析构函数 释放内存池申请过的所有大块内存
@@ -29,6 +30,78 @@ namespace memoryPool
         }
     }
 
+    // 实现无锁入队操作
+    bool MemoryPool::pushFreeList(Slot *slot)
+    {
+        while (true)
+        {
+            // 获取当前头节点
+            Slot *oldHead = freeList_.load(std::memory_order_relaxed);
+            // 将新节点的next指向当前头结点
+            slot->next.store(oldHead, std::memory_order_relaxed);
+
+            // 尝试将新节点设置为头结点
+            if (freeList_.compare_exchange_weak(oldHead, slot, std::memory_order_release, std::memory_order_relaxed))
+            {
+                return true;
+            }
+            // CAS失败则重试
+        }
+    }
+
+    // 实现无锁出队操作
+    Slot *MemoryPool::popFreeList()
+    {
+        while (true)
+        {
+            Slot *oldHead = freeList_.load(std::memory_order_relaxed);
+            if (oldHead == nullptr)
+            {
+                return nullptr;
+            }
+
+            // 获取下一个节点
+            Slot *newHead = oldHead->next.load(std::memory_order_relaxed);
+
+            // 尝试更新头结点
+            if (freeList_.compare_exchange_weak(oldHead, newHead, std::memory_order_acquire, std::memory_order_relaxed))
+            {
+                return oldHead;
+            }
+            // CAS失败则重试
+        }
+    }
+
+    // 从当前MemoryPool中，拿出一个可用的Slot
+    void *MemoryPool::allocate()
+    {
+        // 优先使用空闲链表中的内存槽
+        Slot *slot = popFreeList();
+        if (slot != nullptr)
+        {
+            return slot;
+        }
+
+        // 如果空闲链接为空 则分配新的内存
+        std::lock_guard<std::mutex> lock(mutexForBlock_);
+        if (curSlot_ >= lastSlot_)
+        {
+            allocateNewBlock();
+        }
+
+        Slot *result = curSlot_;
+        curSlot_ = reinterpret_cast<Slot *>(reinterpret_cast<char *>(curSlot_) + SlotSize_);
+        return result;
+    }
+
+    void MemoryPool::deallocate(void *ptr)
+    {
+        if (!ptr)
+            return;
+        Slot *slot = static_cast<Slot *>(ptr);
+        pushFreeList(slot);
+    }
+
     void MemoryPool::init(size_t size)
     {
         /*
@@ -41,49 +114,6 @@ namespace memoryPool
         curSlot_ = nullptr;
         freeList_ = nullptr;
         lastSlot_ = nullptr;
-    }
-
-    // 从当前MemoryPool中，拿出一个可用的Slot
-    void *MemoryPool::allocate()
-    {
-        // 优先使用空闲链表中的内存槽
-        if (freeList_ != nullptr)
-        {
-            // std::lock_guard 是 RAII 锁，进入作用域自动加锁，离开作用域自动解锁。
-            // mutex 不同锁类型，就能更换底层锁
-            std::lock_guard<std::mutex> lock(mutexForFreelist_);
-            if (freeList_ != nullptr)
-            {
-                Slot *tmp = freeList_;
-                freeList_ = freeList_->next;
-                return tmp;
-            }
-        }
-
-        Slot *tmp;
-
-        { // 作用域大括号；仅限制锁对象声明周期，和指针类型无关
-            std::lock_guard<std::mutex> lock(mutexForBlock_);
-            if (curSlot_ >= lastSlot_)
-            {
-                // 当前内存已经满了 需要申请新的内存
-                allocateNewBlock();
-            }
-            tmp = curSlot_;
-            curSlot_ += SlotSize_ / sizeof(Slot);
-        }
-        return tmp;
-    }
-
-    void MemoryPool::deallocate(void *ptr)
-    {
-        if (ptr)
-        {
-            // 回收内存，把内存通过头插法插入到空闲链表中
-            std::lock_guard<std::mutex> lock(mutexForFreelist_);
-            reinterpret_cast<Slot *>(ptr)->next = freeList_;
-            freeList_ = reinterpret_cast<Slot *>(ptr);
-        }
     }
 
     void MemoryPool::allocateNewBlock()
@@ -122,8 +152,8 @@ namespace memoryPool
     /*
     单例模式
     让整个程序只存在一份64个内存池数组，所有申请/释放内存的地方都共用这一份内存池
-    */ 
-    
+    */
+
     MemoryPool &HashBucket::getMemoryPool(int index)
     {
         /*

@@ -1,8 +1,10 @@
-#include <iostream>
+#pragma once // 防止头文件被多次引用
+
+#include <cassert>
+#include <cstdint>
+#include <atomic>
+#include <memory>
 #include <mutex>
-#include <new>
-#include <utility>
-#include <cstddef>
 
 namespace memoryPool
 {
@@ -12,7 +14,7 @@ namespace memoryPool
 
     struct Slot
     {
-        Slot *next;
+        std::atomic<Slot *> next;
     };
     /*
     把外部能用的操作放在public，把内部实现细节 数据 辅助函数全部藏在private
@@ -33,15 +35,18 @@ namespace memoryPool
         void allocateNewBlock();                  // 内部函数 负责向系统申请新的大块内存
         size_t padPointer(char *p, size_t align); // 用于计算地址对齐需要填充多少字节
 
+        // 使用CAS操作进行无锁入队和出队
+        bool pushFreeList(Slot *slot);
+        Slot *popFreeList();
+
     private:
-        size_t BlockSize_;               // 内存块大小
-        size_t SlotSize_;                // 槽大小
-        Slot *firstBlock_;            // 指向内存池管理的首个实际内存块
-        Slot *curSlot_;               // 指向当前未被使用的槽
-        Slot *freeList_;              // 指向空闲的槽（被使用之后又被释放）
-        Slot *lastSlot_;              // 指向当前内存块中最后能够存放元素的位置标识（超过该位置需要重新申请新的内存块）
-        std::mutex mutexForFreelist_; // 保证freeList_在多线程中操作的原子性
-        std::mutex mutexForBlock_;    // 保证多线程情况下避免不必要的重复开辟内存导致的浪费行为
+        size_t BlockSize_; // 内存块大小
+        size_t SlotSize_;  // 槽大小
+        Slot *firstBlock_; // 指向内存池管理的首个实际内存块
+        Slot *curSlot_;    // 指向当前未被使用的槽
+        std::atomic<Slot *> freeList_;
+        Slot *lastSlot_;
+        std::mutex mutexForBlock_;
     };
     /*
         是分发器 负责根据用户申请的大小，找到对应的MemoryPool
