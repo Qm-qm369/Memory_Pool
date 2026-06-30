@@ -4,10 +4,17 @@
 namespace memoryPool
 {
     MemoryPool::MemoryPool(size_t BlockSize)
+        /*
+        这是构造函数初始化列表 类似于赋值BlockSize_ = BlockSize
+        二者顶层逻辑不一样
+        初始化是变量 / 对象创建时第一次赋予初始值，发生在对象诞生瞬间，
+        是从无到有；赋值是对象已存在后，后续覆盖修改已有数值，是从旧到新，
+        且 const、引用等成员仅支持初始化、不支持赋值，初始化效率也高于先默认构造再赋值的方式。
+        */
         : BlockSize_(BlockSize)
     {
     }
-
+    // 析构函数 释放内存池申请过的所有大块内存
     MemoryPool::~MemoryPool()
     {
         Slot *cur = firstBlock_;
@@ -15,6 +22,8 @@ namespace memoryPool
         {
             Slot *next = cur->next;
             // 把 Slot* 链表节点指针，还原成当初 operator new() 返回的原始裸内存地址 void*
+            // reinterpret_cast<void *>(cur) 强制类型二进制原样转换
+            // Slot* 指针原样地址不变，转成 void* 裸指针，不做任何内存拷贝、地址偏移，只改变编译器对这块地址的解读类型。
             operator delete(reinterpret_cast<void *>(cur));
             cur = next;
         }
@@ -34,11 +43,14 @@ namespace memoryPool
         lastSlot_ = nullptr;
     }
 
+    // 从当前MemoryPool中，拿出一个可用的Slot
     void *MemoryPool::allocate()
     {
         // 优先使用空闲链表中的内存槽
         if (freeList_ != nullptr)
         {
+            // std::lock_guard 是 RAII 锁，进入作用域自动加锁，离开作用域自动解锁。
+            // mutex 不同锁类型，就能更换底层锁
             std::lock_guard<std::mutex> lock(mutexForFreelist_);
             if (freeList_ != nullptr)
             {
@@ -49,7 +61,8 @@ namespace memoryPool
         }
 
         Slot *tmp;
-        {
+
+        { // 作用域大括号；仅限制锁对象声明周期，和指针类型无关
             std::lock_guard<std::mutex> lock(mutexForBlock_);
             if (curSlot_ >= lastSlot_)
             {
@@ -106,9 +119,18 @@ namespace memoryPool
         }
     }
 
-    // 单例模式
+    /*
+    单例模式
+    让整个程序只存在一份64个内存池数组，所有申请/释放内存的地方都共用这一份内存池
+    */ 
+    
     MemoryPool &HashBucket::getMemoryPool(int index)
     {
+        /*
+        1. 只会初始化一次
+        2. 生命周期持续到程序结束
+        3. 所有调用 getMemoryPool() 的地方访问的是同一份 memoryPool 数组
+        */
         static MemoryPool memoryPool[MEMORY_POOL_NUM];
         return memoryPool[index];
     }
