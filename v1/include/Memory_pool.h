@@ -48,6 +48,7 @@ namespace memoryPool
         Slot *lastSlot_;
         std::mutex mutexForBlock_;
     };
+
     /*
         是分发器 负责根据用户申请的大小，找到对应的MemoryPool
         申请 1~8B    → 第 0 个 MemoryPool
@@ -110,7 +111,7 @@ namespace memoryPool
     {
         T *p = nullptr;
         if ((p = reinterpret_cast<T *>(HashBucket::useMemory(sizeof(T)))) != nullptr)
-            new (p) T(std::forward<Args>(args)...);
+            new (p) T(std::forward<Args>(args)...); // 直接在地址 p 调用 T 的构造函数
 
         return p;
     }

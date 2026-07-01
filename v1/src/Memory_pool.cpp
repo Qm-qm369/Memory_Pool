@@ -35,12 +35,15 @@ namespace memoryPool
     {
         while (true)
         {
-            // 获取当前头节点
+            // 获取当前头节点 .load 原子读
+            // 这次读取只要求“读取 freeList_ 这个指针本身是原子的”，不要求它和其他内存操作建立同步关系。
             Slot *oldHead = freeList_.load(std::memory_order_relaxed);
-            // 将新节点的next指向当前头结点
+            // 将新节点的next指向当前头结点 .store 原子写
             slot->next.store(oldHead, std::memory_order_relaxed);
 
             // 尝试将新节点设置为头结点
+            // std::memory_order_release, CAS成功时的内存序
+            // std::memory_order_relaxed CAS失败时的内存序
             if (freeList_.compare_exchange_weak(oldHead, slot, std::memory_order_release, std::memory_order_relaxed))
             {
                 return true;

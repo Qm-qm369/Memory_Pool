@@ -9,22 +9,22 @@ using namespace memoryPool;
 // 测试用例
 class P1
 {
-    int id_;
+    int id_[5555];
 };
 
 class P2
 {
-    int id_[5];
+    int id_[5555];
 };
 
 class P3
 {
-    int id_[10];
+    int id_[1055];
 };
 
 class P4
 {
-    int id_[20];
+    int id_[2055];
 };
 
 // 单轮次申请释放次数 线程数 轮次

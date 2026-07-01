@@ -1,3 +1,0 @@
-/home/gdj030227/project_individual/memory_pool/v1/build/CMakeFiles/MemoryPoolProject.dir
-/home/gdj030227/project_individual/memory_pool/v1/build/CMakeFiles/edit_cache.dir
-/home/gdj030227/project_individual/memory_pool/v1/build/CMakeFiles/rebuild_cache.dir
